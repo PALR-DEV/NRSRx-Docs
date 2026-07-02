@@ -37,11 +37,17 @@ services
 `SetupSwaggerGen` adds the framework's operation/document filters:
 
 ```csharp
-options.OperationFilter<DefaultValueFilter>();       // honors [DefaultValue]
+options.OperationFilter<DefaultValueFilter>();       // parameter descriptions + required flags
 options.OperationFilter<AuthorizeOperationFilter>();  // marks secured operations
 options.DocumentFilter<ReverseProxyDocumentFilter>(); // correct paths behind a gateway
-options.SchemaFilter<EnumSchemaFilter>();             // enriches enum schemas with names
 ```
+
+`ConfigureSwaggerOptions` then creates one Swagger document per discovered API version
+(including OData versions when an `IODataVersionProvider` is registered), registering
+`EnumSchemaFilter` alongside each, and adds the `OAuth2` security definition — the latter
+only when both `IdentityAudiences` and `IdentityProvider` are configured (it fetches the
+provider's `.well-known/openid-configuration` to discover the authorize/token endpoints).
+Each document's description also embeds the running build number.
 
 The OData flavor additionally applies `ODataCommonOperationFilter` and
 `ODataCommonDocumentFilter` to handle OData-specific paths and parameters in the spec.
@@ -55,10 +61,11 @@ if (!DisableSwagger && Configuration?.GetValue("DisableSwagger", false) != true)
 
 ## EnumSchemaFilter
 
-By default, Swagger/NSwag renders enum properties as bare integers. The
-`EnumSchemaFilter` (registered automatically by NRSRx) enriches enum schemas so both
-the integer value and the named string appear in the spec. This makes the API more
-readable and is required for accurate client code generation.
+By default, Swagger renders enum properties as bare integers. The `EnumSchemaFilter`
+(registered automatically by NRSRx) rewrites each enum schema to `type: string` with
+values in `"{number} - {name}"` form, e.g. `"1 - Beginner"`, `"2 - Intermediate"` — so
+readers see both the wire value and its meaning. If the enum type carries a
+`[DefaultValue]` attribute, the matching entry is also set as the schema's `default`.
 
 No configuration is needed — it is always applied.
 

@@ -200,8 +200,8 @@ public async Task Get_FiltersByTitle()
     response.EnsureSuccessStatusCode();
 
     var envelope = await DeserializeResponseAsync<ODataEnvelope<Course, Guid>>(response);
-    Assert.AreEqual(1, envelope.Value.Count);
-    Assert.AreEqual("Algebra", envelope.Value[0].Title);
+    Assert.AreEqual(1, envelope.Value.Count());
+    Assert.AreEqual("Algebra", envelope.Value.First().Title);
 }
 ```
 

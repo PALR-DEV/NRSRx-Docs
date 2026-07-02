@@ -37,8 +37,8 @@ You only reference the ones you need. All are published to
 
 | Package | Purpose |
 | --- | --- |
-| `IkeMtz.NRSRx.Jobs.Core` | The `JobBase<TProgram>` host, the function model (`IFunction`, `MessageFunction`), and `AddFunction<T>()`. |
-| `IkeMtz.NRSRx.Jobs.Redis` | Redis-backed message functions for consuming event streams. |
+| `IkeMtz.NRSRx.Jobs.Core` | The `JobBase<TProgram>` host, the function contracts (`IFunction`, `IMessageFunction`), and `AddFunction<T>()`. |
+| `IkeMtz.NRSRx.Jobs.Redis` | Redis-backed message function base classes (`MessageFunction`, `SplitMessageFunction`) for consuming event streams. |
 | `IkeMtz.NRSRx.Jobs.Cron` | Schedule jobs to run on a cron-style timetable. |
 | `IkeMtz.NRSRx.Jobs.Logging.Splunk` | Splunk logging for jobs. |
 | `IkeMtz.NRSRx.Jobs.Unigration` | Unigration testing for jobs. |

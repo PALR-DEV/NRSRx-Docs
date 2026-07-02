@@ -109,9 +109,14 @@ public interface IDeletable
 }
 ```
 
-When `AuditableDbContext` detects a delete on an `IDeletable` entity, it stamps
-`DeletedOnUtc` and `DeletedBy` instead of issuing a `DELETE` statement. To hide
-soft-deleted records from queries, add a global EF query filter:
+:::caution Not automated by the base context
+Despite the XML doc comments on the interface, the current `AuditableDbContext` does
+**not** intercept deletes — it never stamps `DeletedOnUtc`/`DeletedBy` for you. Set these
+fields yourself (e.g., in the controller or an `OnIAuditableUpdate` override) instead of
+calling `Remove()` when you want a soft delete.
+:::
+
+To hide soft-deleted records from queries, add a global EF query filter:
 
 ```csharp
 protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -123,9 +128,13 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
 
 ### IEnableable
 
-Adds an `IsEnabled` flag for toggling records on and off without deleting them. When used
-with `AuditableDbContext`, `IsEnabled` is set to `true` automatically when a record is
-created.
+Adds an `IsEnabled` flag for toggling records on and off without deleting them.
+
+:::caution Not automated by the base context
+As with `IDeletable`, the interface's XML comments suggest `AuditableDbContext` manages
+this flag, but the current implementation contains no `IEnableable` handling — set
+`IsEnabled` explicitly in your own code.
+:::
 
 ```csharp
 public interface IEnableable
@@ -205,7 +214,9 @@ modelBuilder.Entity<CourseLevelLookup>().HasData(
 
 `EnumHelper` also provides `ToIEnumerable<TEnum>()` which returns
 `IEnumerable<(int Id, string Name)>` tuples — useful when you just need the values without
-an entity class.
+an entity class. Both helpers have generic-key overloads for non-`int` identifiers:
+`ToIEnumerable<TEnum, TKeyType>()` and
+`ConvertEnumValues<TEnum, TIdentityType, TEnumValueType>()`.
 
 ## Putting it together
 
@@ -269,7 +280,7 @@ public class StudentUpsertRequest : IIdentifiable
 ## UserProvider — fixed user ID
 
 `UserProvider` (base class in `IkeMtz.NRSRx.Core.Models`) is a simple
-`ICurrentUserProvider` that always returns a fixed string. It is the base for
+`ICurrentUserProvider` that returns a fixed string. It is the base for
 `SystemUserProvider` (from `IkeMtz.NRSRx.Core.EntityFramework`) and is also useful in
 unit tests:
 
@@ -277,6 +288,12 @@ unit tests:
 // In a unit test that needs a deterministic user ID:
 var db = new DatabaseContext(options, new UserProvider("test-user-id"));
 ```
+
+:::note defaultValue wins
+`UserProvider.GetCurrentUserId(defaultValue)` returns `defaultValue ?? UserId` — so if a
+caller passes a non-null `defaultValue`, that value is returned *instead of* the fixed
+user ID, not just as a fallback.
+:::
 
 `SystemUserProvider` returns `"NRSRx System User"` and is the standard choice for jobs
 and other non-HTTP contexts. You can change the string globally via

@@ -137,21 +137,31 @@ lets it be retried up to `MaxMessageProcessRetry`.
 
 `RedisSubscriberOptions` tunes how the subscriber reads a stream:
 
-| Option | Meaning |
-| --- | --- |
-| `StartPosition` | Where to begin reading (`Beginning`, or new messages only). |
-| `IdleTimeSpanInMilliseconds` | How long to wait when the stream is idle. |
-| `MaxMessageProcessRetry` | How many times to retry a failing message before giving up. |
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `StartPosition` | `StreamPosition.NewMessages` | Where the consumer group starts reading (`StreamPosition.Beginning` to replay existing messages). |
+| `IdleTimeSpanInMilliseconds` | `600_000` (10 min) | How long a *consumer* must be inactive before it's considered idle — its pending messages become claimable by others, and `DeleteIdleConsumersAsync` removes it once drained. |
+| `MaxMessageProcessRetry` | `3` | Delivery attempts before a pending message is claimed to the `dead-letter` consumer instead of being redelivered. |
+| `ConsumerGroupName` | `{StreamKey}:{EntryAssemblyName}` | Override the consumer group name (auto-prefixed with the stream key if you omit it). |
+| `MessagesPerBatchCount` | `5` | Messages fetched per `GetMessagesAsync` call. |
+| `PendingMessagesPerBatchCount` | `5` | Messages fetched per `GetPendingMessagesAsync` call. |
+
+Each `MessageFunction.RunAsync()` pass processes new messages, then (if
+`EnablePendingMsgProcessing`, default `true`) claims and retries pending ones, then
+deletes idle consumers and rotates its own consumer name (a fresh GUID) for the next
+pass.
 
 ## Large messages: SplitMessageFunction
 
-When a publisher sends a `SplitMessage<T>` (a large entity chunked across multiple
-messages), use `SplitMessageFunction<TSelf, TEntity, TEvent>` (from `IkeMtz.NRSRx.Jobs.Redis`)
-on the subscriber side.
+When a publisher fans a batch out as `SplitMessage<T>` messages (one entity per message,
+sharing a batch id and `TaskCount` — see
+[Publishers](./publishers.md#large-payloads-splitmessaget)), use
+`SplitMessageFunction<TSelf, TEntity, TEvent>` (from `IkeMtz.NRSRx.Jobs.Redis`) on the
+subscriber side.
 
-`SplitMessageFunction` extends `MessageFunction` and adds fan-out tracking: it uses Redis
-to count `Passed` and `Failed` chunks, and calls `NotifySplitCompletion` automatically
-once all chunks (`TaskCount`) have been processed.
+`SplitMessageFunction` extends `MessageFunction` and adds batch tracking: it keeps a Redis
+hash of `Passed`/`Failed` counts per batch (keyed `{StreamKey}:{batchId}`), and calls
+`NotifySplitCompletion` automatically once `Passed + Failed` reaches `TaskCount`.
 
 ```csharp
 public class SchoolUpdatedSplitFunction
@@ -165,29 +175,36 @@ public class SchoolUpdatedSplitFunction
     AutoDeleteSplitProgressData = true; // clean up Redis progress keys when done
   }
 
-  public override Task<bool> HandleMessageAsync(SplitMessage<School> entity)
+  public override Task<bool> HandleMessageAsync(SplitMessage<School> message)
   {
-    // Process one chunk. entity.Payload is the partial School data.
-    Logger.LogInformation("Processing chunk for School {Id}", entity.Id);
+    // Process one item. message.Entity is the School; message.Id is the batch id.
+    Logger.LogInformation("Processing School {Id}", message.Entity.Id);
     return Task.FromResult(true);
   }
 
-  // Called once all chunks for a given entity have been processed.
-  public override Task NotifySplitCompletion(SplitMessage<School> entity)
+  // Called once all messages in the batch have been processed.
+  public override Task NotifySplitCompletion(SplitMessage<School> message)
   {
-    Logger.LogInformation("All chunks for School {Id} processed", entity.Id);
+    Logger.LogInformation("Batch {Id} ({TaskName}) complete", message.Id, message.TaskName);
     return Task.CompletedTask;
   }
 }
 ```
 
+:::note Failure = exception, not `false`
+Unlike the base `MessageFunction`, the split batch loop ignores `HandleMessageAsync`'s
+return value — a message counts as `Passed` unless the handler **throws**, which records
+it as `Failed`. Also note `ProcessStreamsAsync` here loops until the stream is drained
+rather than processing a single buffer per pass.
+:::
+
 Key members of `SplitMessageFunction`:
 
 | Member | Default | Purpose |
 | --- | --- | --- |
-| `AutoDeleteSplitProgressData` | `true` | Delete Redis progress keys when all chunks complete. |
-| `NotifySplitCompletion(entity)` | no-op | Override to act when all chunks are done. |
-| `NotifySplitProgress(entity, isSuccess)` | (automatic) | Called per chunk; updates Redis counters. |
+| `AutoDeleteSplitProgressData` | `true` | Delete the Redis progress hash when the batch completes. |
+| `NotifySplitCompletion(message)` | no-op | Override to act when the whole batch is done. |
+| `NotifySplitProgress(message, isSuccess)` | (automatic) | Called per message; increments the Redis counters and returns a `SplitMessageProgressUpdate` (`Passed`/`Failed`/`Total`). |
 
 ## Scheduled (cron) jobs
 

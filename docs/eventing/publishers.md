@@ -27,7 +27,7 @@ public interface IPublisher<TEntity, TEvent>
 ```
 
 - `TEntity` — the thing you're publishing (must implement [`IIdentifiable`](../data/models-and-interfaces.md#iidentifiable)).
-- `TEvent` — the [event type](./overview.md#events-are-entity--verb) verb
+- `TEvent` — the [event type](./overview.md#events-are-entity-plus-verb) verb
   (`CreatedEvent`, `UpdatedEvent`, `DeletedEvent`, …).
 
 A non-`Guid` key variant, `IPublisher<TEntity, TEvent, TKey>`, exists for entities keyed
@@ -82,26 +82,30 @@ public class SchoolsController : ControllerBase
 
 ## Registering publishers — Redis
 
-Override `SetupPublishers` in your `Startup`. Call `AddRedisStreamPublisher<TEntity, TEvent>`
-for each entity+event combination you publish:
+Override `SetupPublishers` in your `Startup` and register a `RedisStreamPublisher` for
+each entity+event combination you publish (there is no registration extension method for
+Redis — this is the pattern the samples use):
 
 ```csharp
 public override void SetupPublishers(IServiceCollection services)
 {
   var redis = ConnectionMultiplexer.Connect(
       Configuration.GetValue<string>("REDIS_CONNECTION_STRING"));
-  services.AddSingleton<IConnectionMultiplexer>(redis);
 
-  services.AddRedisStreamPublisher<School, CreatedEvent>();
-  services.AddRedisStreamPublisher<School, UpdatedEvent>();
-  services.AddRedisStreamPublisher<School, DeletedEvent>();
+  services.AddSingleton<IPublisher<School, CreatedEvent>>(
+      x => new RedisStreamPublisher<School, CreatedEvent>(redis));
+  services.AddSingleton<IPublisher<School, UpdatedEvent>>(
+      x => new RedisStreamPublisher<School, UpdatedEvent>(redis));
+  services.AddSingleton<IPublisher<School, DeletedEvent>>(
+      x => new RedisStreamPublisher<School, DeletedEvent>(redis));
 }
 ```
 
-For large payloads (see below), also register the split-message publisher:
+For large workloads (see below), register the split-message publisher the same way:
 
 ```csharp
-services.AddRedisStreamSplitMessagePublisher<School, UpdatedEvent>();
+services.AddSingleton<IPublisher<SplitMessage<School>, UpdatedEvent>>(
+    x => new RedisStreamSplitMessagePublisher<School, UpdatedEvent>(redis));
 ```
 
 ## Registering publishers — Azure Service Bus
@@ -147,48 +151,56 @@ Set these in `appsettings.json` or as environment variables:
 }
 ```
 
-If a connection string is missing, `ConnectionStringMissingException` is thrown at
-startup — intentional fail-fast behavior.
+If a connection string is missing, `ConnectionStringMissingException` is thrown when the
+publisher is constructed (on first resolution from DI) — intentional fail-fast behavior.
 
-## Stream / topic naming
+## Stream / queue naming
 
-NRSRx derives the destination name from the entity type and the event suffix:
+NRSRx derives the destination name from the entity type and the event suffix — but the
+exact format differs by transport:
 
-```
-{EntityName}{EventSuffix}
-→  School + CreatedEvent (suffix "Created") → SchoolCreated stream/queue
-```
+| Transport | Format | `School` + `CreatedEvent` |
+| --- | --- | --- |
+| Redis Streams | `{EntityName}:{EventSuffix}` (colon-separated) | `School:Created` |
+| Azure Service Bus | `{EntityName}{EventSuffix}` (concatenated) | `SchoolCreated` |
 
-Subscribers listen on the same derived name, which is how producers and consumers
-rendezvous without hard-coding strings on both sides.
+For generic payloads like `SplitMessage<School>`, the Redis key expands to
+`{InnerEntity}:{GenericTypeName}:{EventSuffix}` — e.g. `School:SplitMessage:Created`.
+
+Subscribers derive the same name from the same type parameters, which is how producers and
+consumers rendezvous without hard-coding strings on both sides.
 
 ## Large payloads: SplitMessage&lt;T&gt;
 
-For payloads too large for a single message, publish a `SplitMessage<T>` instead. The
-abstraction tracks the total number of chunks (`TaskCount`) so the subscriber side knows
-when all chunks have arrived.
+When one event should fan out into many independently-processed messages (one per entity),
+publish `SplitMessage<T>` messages. Each message carries one `Entity` plus batch metadata:
+a shared `Id` (the batch/task id — the *same* `Guid` for every message in the batch),
+`TaskName`, `TaskCount` (total messages in the batch), and `QueuedBy`. The subscriber side
+uses `TaskCount` to know when the whole batch has been processed.
+
+Use the static `FromCollection` factory to build the batch:
 
 ```csharp
-// Publisher side: send a large School as N chunks.
-var splitPublisher = services.GetRequiredService<
+// Publisher side: fan a collection of Schools out as individual messages.
+var splitPublisher = serviceProvider.GetRequiredService<
     IPublisher<SplitMessage<School>, UpdatedEvent>>();
 
-var chunks = BuildChunks(largeSchool, chunkSize: 10);
-foreach (var chunk in chunks)
+var messages = SplitMessage<School>.FromCollection(
+    schools,                      // IEnumerable<School>
+    taskName: "school-refresh",
+    userName: "import-service");  // becomes QueuedBy
+
+foreach (var message in messages)
 {
-    await splitPublisher.PublishAsync(new SplitMessage<School>
-    {
-        Id        = largeSchool.Id,
-        TaskCount = chunks.Count,
-        Payload   = chunk,
-    });
+    await splitPublisher.PublishAsync(message);
 }
 ```
 
 On the subscriber side, use `SplitMessageFunction<TFunction, TEntity, TEvent>` (from
 `IkeMtz.NRSRx.Jobs.Redis`) which tracks `Passed`/`Failed` counts and calls
 `NotifySplitCompletion` automatically when all chunks are processed. See
-[Jobs & Subscribers](./jobs.md#large-messages) for the full subscriber example.
+[Jobs & Subscribers](./jobs.md#large-messages-splitmessagefunction) for the full
+subscriber example.
 
 ## Publish, then what?
 

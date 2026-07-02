@@ -55,9 +55,10 @@ No matter which base class you pick, you get the same `CoreWebStartup` machinery
 
 * Layered [configuration](../concepts/configuration.md)
 * JWT [authentication and authorization](../concepts/authentication-authorization.md)
-* [Swagger and OpenAPI](../concepts/swagger.md) with OIDC login
+* [Swagger and OpenAPI](../concepts/swagger.md) with OIDC login *(WebApi and OData only)*
 * API and model [versioning](../concepts/versioning.md)
 * A `/healthz` health-check endpoint
-* `ICurrentUserProvider` for audit attribution
+* `ICurrentUserProvider` for audit attribution *(WebApi and OData only — see the
+  [SignalR page](./signalr.md) for what its leaner pipeline omits)*
 
 The flavor-specific pages below focus on what's *different*.

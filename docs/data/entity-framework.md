@@ -86,11 +86,12 @@ So you never write `entity.CreatedBy = ...` by hand, and you can't forget to. Th
 comes from [`ICurrentUserProvider`](../concepts/authentication-authorization.md#who-is-the-current-user-icurrentuserprovider),
 which is HTTP-aware in web services and can be a `SystemUserProvider` in jobs.
 
-:::warning Misconfigured claim mapping
-If `JwtNameClaimMapping` points to a claim that is absent from the token,
-`AuditableDbContext` will throw `AuditableInvalidUserException`. This is intentional
-fail-fast behavior to catch misconfigured claim mappings early. If you see this exception,
-check the `JwtNameClaimMapping` property on your `Startup`.
+:::note AuditableInvalidUserException
+The package also defines `AuditableInvalidUserException` ("Current user does not have a
+valid username. Ensure that the Startup.JwtNameClaimMapping property is set correctly.").
+The base `AuditableDbContext` does **not** throw it — it's provided for your own
+overrides (e.g., throw from `OnIAuditableCreate` when `GetCurrentUserId()` returns null)
+to fail fast on a misconfigured `JwtNameClaimMapping`.
 :::
 
 ### Calculated values
@@ -204,9 +205,15 @@ etc.) for performance reasons. Set these fields yourself before calling
 `SaveChangesInBatchAsync` if you need them.
 :::
 
-:::note Requires DbContext pooling
-Use `AddDbContextPool<T>()` when registering your DbContext — the factory pattern requires it.
+:::note Use DbContext pooling
+Because the saver creates a fresh context per batch via your factory, use
+`AddDbContextPool<T>()` when registering your DbContext — the source explicitly recommends
+pooling for performance.
 :::
+
+Each batch gets a new context configured with write-optimized settings:
+`AutoDetectChangesEnabled = false`, `QueryTrackingBehavior = NoTracking`, and
+`LazyLoadingEnabled = false`, and saves with `acceptAllChangesOnSuccess: false`.
 
 ```csharp
 public class CourseImportService

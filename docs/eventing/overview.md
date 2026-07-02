@@ -60,7 +60,7 @@ follows the same `HandleMessageAsync` → ack flow, just with a different proces
 | **Best for** | Self-hosted, on-prem, and local dev | Azure-native, enterprise production |
 | **Infrastructure** | A single Redis instance or cluster | Azure namespace (managed by Microsoft) |
 | **Replay / history** | Streams retain all messages until trimmed | Standard queues are destructive; topics retain for TTL |
-| **Dead-letter** | Manual (implement your own DLQ) | Built-in dead-letter queue |
+| **Dead-letter** | NRSRx's subscriber claims messages that exceed `MaxMessageProcessRetry` to a `dead-letter` consumer in the group | Built-in dead-letter queue |
 | **Consumer groups** | Redis consumer groups, built in | Topics + subscriptions |
 | **Cost** | Redis hosting only | Per-operation Azure billing |
 | **NRSRx subscriber** | `RedisStreamSubscriber<T, TEvent>` | Azure SDK `ServiceBusProcessor` |
@@ -82,10 +82,12 @@ event types live in `IkeMtz.NRSRx.Events.Abstraction`:
 | `SendEvent` | `SentEvent` |
 | (none) | `ReceivedEvent` |
 
-Each carries an `EventSuffix` (for example `"Created"`). NRSRx composes the stream or topic
-name from the entity name plus the suffix, so a `School` paired with `CreatedEvent` flows on
-a `SchoolCreated` stream. Choosing imperative versus past-tense lets you model both
-*commands* ("please create this") and *notifications* ("this was created").
+Each carries an `EventSuffix` (for example `"Created"`). NRSRx composes the stream or
+queue name from the entity name plus the suffix: a `School` paired with `CreatedEvent`
+flows on the `School:Created` Redis stream, or the `SchoolCreated` Service Bus queue (see
+[Stream / queue naming](./publishers.md#stream--queue-naming)). Choosing imperative versus
+past-tense lets you model both *commands* ("please create this") and *notifications*
+("this was created").
 
 ## The two halves
 

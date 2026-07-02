@@ -70,37 +70,50 @@ await validator.InitAsync(metaDataAddress, "audience1,audience2");
 | Token replay | ✅ |
 | Actor | ✅ |
 
-Returns `true` if the token passes all checks. Throws `SecurityTokenException` subtypes
-on validation failure (expired, invalid signature, wrong audience, etc.).
+Returns `true` if the token passes all checks (specifically, whether the resulting
+principal is authenticated). Throws `SecurityTokenException` subtypes on validation
+failure (expired, invalid signature, wrong audience, etc.), and `InvalidProgramException`
+if you call it before `InitAsync`. Each call also requests a refresh of the OIDC
+configuration and assigns the validated principal to `Thread.CurrentPrincipal`.
 
 ### Example: validating tokens in a job
+
+Initialize the validator before starting the job loop, register it as a dependency, and
+use it inside a function:
 
 ```csharp
 public class Program : JobBase<Program>, IJob
 {
-  private ITokenValidator _tokenValidator;
-
-  public override async Task RunAsync()
+  public static async Task Main()
   {
-    _tokenValidator = new TokenValidator();
-    await _tokenValidator.InitAsync(
-        Configuration.GetValue<string>("IdentityProvider") + ".well-known/openid-configuration",
-        Configuration.GetValue<string>("IdentityAudiences"));
-    await base.RunAsync();
+    var prog = new Program();
+    _ = await prog.RunAsync();
   }
+
+  public override IServiceCollection SetupDependencies(IServiceCollection services)
+  {
+    var validator = new TokenValidator();
+    validator.InitAsync(
+        Configuration.GetValue<string>("IdentityProvider") + ".well-known/openid-configuration",
+        Configuration.GetValue<string>("IdentityAudiences"))
+      .GetAwaiter().GetResult();
+    return base.SetupDependencies(services)
+      .AddSingleton<ITokenValidator>(validator);
+  }
+
+  public override IServiceCollection SetupFunctions(IServiceCollection services) =>
+    services.AddFunction<MyFunction>();
 }
 
-public class MyFunction : IFunction
+public class MyFunction(ITokenValidator tokenValidator) : IFunction
 {
-  private readonly ITokenValidator _tokenValidator;
+  public int? SequencePriority => null;
 
-  public override Task<bool> HandleMessageAsync(MyMessage msg)
+  public Task<bool> RunAsync()
   {
-    // Validate a token included in the message envelope.
-    if (!_tokenValidator.ValidateToken(msg.BearerToken))
-      return Task.FromResult(false);
-    // ...
-    return Task.FromResult(true);
+    // Validate a token obtained from a message envelope, header, etc.
+    var isValid = tokenValidator.ValidateToken(GetBearerTokenFromSomewhere());
+    return Task.FromResult(isValid);
   }
 }
 ```

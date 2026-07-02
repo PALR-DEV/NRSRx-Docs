@@ -75,8 +75,11 @@ public override string JwtRoleClaimMapping => "roles";
 
 :::warning Misconfigured claim mapping
 If `JwtNameClaimMapping` is set to a claim that is absent from the token,
-`AuditableDbContext` will throw `AuditableInvalidUserException` when it tries to stamp
-`CreatedBy`. This is a deliberate fail-fast to catch misconfigured claim mappings early.
+`User.Identity.Name` will be `null` and `AuditableDbContext` will stamp a `null`
+`CreatedBy` (typically surfacing later as a database `NOT NULL` violation). The
+`AuditableInvalidUserException` type exists for this scenario, but the base context does
+not throw it automatically — see
+[Entity Framework](../data/entity-framework.md#auditing).
 :::
 
 ## Authorization: role-based
@@ -104,9 +107,11 @@ claim-based permission checks that go beyond role membership.
 
 ### PermissionsFilterAttribute
 
-Checks the user's `permissions` claim (comma-separated values) or `scope` claim
-(space-separated values) for one of the allowed values. Returns `401 Unauthorized` if none
-match.
+Checks the user's `permissions` claims or `scope` claim for one of the allowed values.
+Each `permissions` claim value is matched **whole** (identity providers like Auth0 emit
+one claim per permission); the `scope` claim is split on spaces per the OAuth2 convention.
+Matching is case-insensitive. If none match, the action returns `401 Unauthorized` with a
+message listing the required permissions.
 
 ```csharp
 // Allow users with the "courses:write" permission or scope.

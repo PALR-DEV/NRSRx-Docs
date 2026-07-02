@@ -52,7 +52,7 @@ user's tenant memberships are determined:
 ```csharp
 public class TenantFilterAttribute : CoreTenantFilterAttribute
 {
-  protected override IEnumerable<string> GetUserTenants(HttpContext httpContext)
+  public override IEnumerable<string> GetUserTenants(HttpContext httpContext)
   {
     // Read tenant memberships from a custom JWT claim.
     return httpContext.User.Claims
@@ -62,9 +62,19 @@ public class TenantFilterAttribute : CoreTenantFilterAttribute
 }
 ```
 
-The base class then compares the returned tenants against the `TenantId` property on the
-model (resolved via `ITentantable`) and rejects requests where the user's tenants don't
-include the requested tenant.
+The base class implements `IAuthorizationFilter` and validates the **`tid` query-string
+parameter** on every request:
+
+1. If the request has no `tid` query parameter → **400 Bad Request**
+   (`"Query string param tid is required for this endpoint."`).
+2. If `GetUserTenants` returns no tenants → **401 Unauthorized**
+   (`"The current user doesn't have access to any tenants."`).
+3. If `tid` is not among the user's tenants → **401 Unauthorized**
+   (`"The current user doesn't have access to the {tid} tenant."`).
+
+Note the filter only *authorizes* the requested tenant — it does not automatically filter
+your database query. Your action still needs to scope its query to the `tid` value (which
+is now guaranteed to be one the caller belongs to).
 
 Apply your concrete attribute to controllers that should enforce tenant scoping:
 
@@ -73,12 +83,16 @@ Apply your concrete attribute to controllers that should enforce tenant scoping:
 [TenantFilter]
 public class DocumentsController : ControllerBase
 {
+  // Callers must include ?tid={tenantId} — the filter rejects the
+  // request otherwise.
   [HttpGet("{id}")]
-  public async Task<ActionResult<Document>> Get([FromRoute] Guid id)
+  public async Task<ActionResult<Document>> Get(
+      [FromRoute] Guid id, [FromQuery] string tid)
   {
-    // The filter has already verified that the request's tenantId
-    // is one the user belongs to.
-    var doc = await _db.Documents.FindAsync(id);
+    // The filter has verified the caller belongs to `tid`;
+    // scope the query to it yourself.
+    var doc = await _db.Documents
+        .FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tid);
     return doc == null ? NotFound() : Ok(doc);
   }
 }
@@ -129,21 +143,26 @@ var token = GenerateTestToken(claims =>
 });
 GenerateAuthHeader(client, token);
 
-// The TenantFilterAttribute will allow this request because the user
-// has the "acme-corp" tenant.
-var response = await client.GetAsync($"api/v1/Documents/{docId}");
+// The TenantFilterAttribute allows this request: ?tid=acme-corp matches
+// the user's "acme-corp" tenant claim.
+var response = await client.GetAsync($"api/v1/Documents/{docId}?tid=acme-corp");
 response.EnsureSuccessStatusCode();
 ```
 
-To test the rejection path, omit the tenant claim or use a different tenant:
+To test the rejection paths:
 
 ```csharp
+// Wrong tenant → 401 Unauthorized.
 var token = GenerateTestToken(claims =>
 {
   claims.Add(new Claim("tenant_id", "wrong-tenant"));
 });
 GenerateAuthHeader(client, token);
 
-var response = await client.GetAsync($"api/v1/Documents/{docId}");
+var response = await client.GetAsync($"api/v1/Documents/{docId}?tid=acme-corp");
 Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+
+// Missing ?tid= entirely → 400 Bad Request.
+response = await client.GetAsync($"api/v1/Documents/{docId}");
+Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
 ```

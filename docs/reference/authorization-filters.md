@@ -38,10 +38,12 @@ public class CoursesController : ControllerBase
 ### How the check works
 
 1. The filter reads all claims whose type matches `PermissionClaimType` (default: `"permissions"`).
-2. It splits each claim value by `PermissionClaimSeparator` (default: `,`).
-3. If any resulting value matches one of the `AllowedPermissions` (case-insensitive), access is granted.
-4. If `AllowScopes` is `true` (default), it also checks `ScopeClaimType` (default: `"scope"`), splitting each value by space.
-5. If no match is found, it returns a `401` with a message listing the required permissions.
+2. Each claim value is compared **whole** against `AllowedPermissions` (case-insensitive) —
+   identity providers like Auth0 emit one `permissions` claim per permission, so no
+   splitting is needed. If any match, access is granted.
+3. If `AllowScopes` is `true` (default), it also checks `ScopeClaimType` (default: `"scope"`),
+   splitting each value by space per the OAuth2 convention.
+4. If no match is found, it returns a `401` with a message listing the required permissions.
 
 ### Constructor parameters
 
@@ -59,7 +61,7 @@ public PermissionsFilterAttribute(
 | `allowedPermissions` | (required) | One or more permission values; any match grants access. |
 | `allowScopes` | `true` | Also check the `scope` claim as a fallback. |
 | `permissionClaimType` | `"permissions"` | The claim type that contains permissions. |
-| `permissionClaimSeparator` | `','` | How multiple permissions are separated within one claim value. |
+| `permissionClaimSeparator` | `','` | Accepted and stored on the attribute, but **not used** by the current matching logic — `permissions` claim values are matched whole, never split. |
 | `scopeClaimType` | `"scope"` | The claim type used for OAuth scopes. |
 
 ### Disabling scope fallback
@@ -164,7 +166,11 @@ In unigration tests, inject custom permissions into the test token using
 ```csharp
 var token = GenerateTestToken(claims =>
 {
-  claims.Add(new Claim("permissions", "courses:write,courses:read"));
+  // One claim per permission — values are matched whole, not comma-split.
+  claims.Add(new Claim("permissions", "courses:write"));
+  claims.Add(new Claim("permissions", "courses:read"));
+  // Alternatively, the "scope" claim IS space-separated:
+  // claims.Add(new Claim("scope", "courses:write courses:read"));
 });
 GenerateAuthHeader(client, token);
 ```

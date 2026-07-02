@@ -45,6 +45,10 @@ public class Startup : CoreODataStartup
 > OData read services pair well with `AddDbContextPool` for throughput, since they're
 > typically high volume and read only.
 
+`MaxTop` defaults to `100` if you don't override it. Route components are registered per
+EDM version at `odata/{version}` (e.g. `odata/v1`), with attribute routing enabled,
+case-insensitive controller-name matching, and the OData `TimeZone` fixed to UTC.
+
 In the `Development` environment, `CoreODataStartup.Configure` also calls
 `app.UseODataRouteDebug()`, which exposes a route debug endpoint at `/$odata`. This is
 useful when debugging why a particular query path is not resolving correctly.
@@ -139,6 +143,23 @@ GET /odata/v1/Courses?$select=Id,Title
 GET /odata/v1/Courses?$expand=SchoolCourses
 GET /odata/v1/Courses/$count
 ```
+
+## The custom serializer: default values are omitted
+
+`CoreODataStartup` registers `NrsrxODataSerializerProvider`, which swaps in
+`NrsrxODataSerializer` for all entity and complex types. That serializer **omits
+properties whose value is the type default** from the response payload:
+
+* `null` properties are dropped.
+* Numeric properties (`short`, `int`, `long`, `decimal`, `double`, `float`, and unsigned
+  variants) equal to `0` are dropped.
+* `DateTime` / `DateTimeOffset` properties equal to `default` (year 1) are dropped.
+
+This keeps payloads lean, but be aware of the consequence: **a client cannot distinguish
+"the score is 0" from "the score was not returned"** — a legitimate `0` or default date
+simply doesn't appear in the JSON. Deserialize into types with defaulting semantics that
+match. (OData payload validations are also disabled via
+`ODataMessageWriterSettings.Validations = ValidationKinds.None`.)
 
 ## The response envelope: ODataEnvelope&lt;TEntity, TKey&gt;
 

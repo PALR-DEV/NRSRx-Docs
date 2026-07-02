@@ -50,6 +50,7 @@ These are the configuration keys the framework itself reads:
 | `SwaggerClientId` | Swagger UI | OAuth client id used by the Swagger "Authorize" button. |
 | `SwaggerClientSecret` | Swagger UI | OAuth client secret (for confidential clients). |
 | `SwaggerAppName` | Swagger UI | Display name for the Swagger OAuth app. |
+| `swaggerReverseProxyBasePath` | `ReverseProxyDocumentFilter` | When set, this base path is prepended to every path in the generated Swagger document — use it when the service sits behind a reverse proxy that adds a path prefix. |
 
 ## Eventing and jobs keys
 

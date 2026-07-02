@@ -109,9 +109,11 @@ _db.SyncGuidCollections(
   have access to these extension methods.
 - Removed items are deleted from the EF context immediately via `auditableContext.Remove(destItem)`.
   They will be deleted from the database when `SaveChanges` is called.
-- New items whose `Id` in the source is `Guid.Empty` are assigned a new `Guid.Empty` id
-  (left for the database to assign if you're using identity columns). Otherwise the source
-  `Id` is carried over.
+- New items do **not** inherit the source item's `Id`: the default `updateLogic`
+  (SimpleMapper) skips `Id`, and the syncer only copies it when the source `Id` equals
+  `Guid.Empty` (a no-op). New destination entities therefore keep their default key, which
+  is assigned by EF/the database on save. If you need the source `Id` carried over, copy it
+  in a custom `updateLogic`.
 - The `sourceCollection` can be `null` — it is treated as an empty collection, so all
   destination items are removed.
 

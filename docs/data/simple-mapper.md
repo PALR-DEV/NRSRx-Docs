@@ -89,6 +89,13 @@ For a handful of numeric types (`int`, `long`, `decimal`, `float`, and their nul
 forms), `SimpleMapper` does a safe parse and convert, so close-but-not-identical numeric
 types still map. Anything else requires an exact type match.
 
+Two more behaviors worth knowing:
+
+* If the source and destination values are already equal, the property is skipped (no
+  redundant `SetValue`, which keeps EF change tracking quiet).
+* `ApplyChanges` throws `ArgumentNullException` if either the source or the destination is
+  `null` — guard the "entity not found" case before mapping.
+
 ## Generic variants
 
 | Type | Use |

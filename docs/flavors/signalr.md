@@ -36,14 +36,22 @@ public class Startup : CoreSignalrStartup
 ```
 
 :::note Differences from WebApi/OData
-`CoreSignalrStartup` does **not** call `SetupSwagger` or `SetupPublishers` — there is no
-Swagger UI in a SignalR service, and publishers are not part of the base SignalR pipeline.
-Add them in `SetupMiscDependencies` if your hub also needs to publish events.
+`CoreSignalrStartup` runs a leaner `ConfigureServices` than the other flavors. It does
+**not** call:
+
+* `SetupSwagger` — there is no Swagger UI in a SignalR service.
+* `SetupPublishers` — publishers are not part of the base SignalR pipeline.
+* `SetupAppSettings` / `SetupCurrentUserProvider` — so `AppSettings` is not bound and no
+  `ICurrentUserProvider` is registered by default.
+
+Add anything you need in `SetupMiscDependencies` — for example, register an
+`ICurrentUserProvider` there if your hub persists data through `AuditableDbContext`.
+Also note `ServiceTitle` and `StartupAssembly` are pre-overridden to return `null`, so you
+only override them if you need them.
 :::
 
-The base class provides the shared `CoreWebStartup` machinery (configuration, JWT
-authentication, and health checks), so your hubs are authenticated the same way your APIs
-are.
+The base class still provides JWT authentication, `SetupDatabase`, `SetupLogging`, and the
+`/healthz` health check, so your hubs are authenticated the same way your APIs are.
 
 ## Hubs
 

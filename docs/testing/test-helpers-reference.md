@@ -67,6 +67,7 @@ Each flavor has a pair of test startup classes:
 | `CoreWebApiIntegrationTestStartup<TStartup>` | WebApi integration tests against a containerized DB. |
 | `CoreODataUnigrationTestStartup<TStartup>` | OData unigration tests. |
 | `CoreODataTestStartup<TStartup>` | OData integration tests. |
+| `CoreODataIntegrationTestStartup<TStartup>` | OData integration tests against a containerized DB. |
 | `CoreSignalrUnigrationTestStartup<TStartup>` | SignalR unigration tests. |
 
 ---
@@ -160,22 +161,102 @@ var fakeTime = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, Time
 
 ### FakeLogger
 
-A no-op `ILogger<T>` implementation that captures calls for assertion:
+A non-generic `ILogger` implementation that records every call for assertion:
 
 ```csharp
-var fakeLogger = new FakeLogger<MyService>();
+var fakeLogger = new FakeLogger();
 var service = new MyService(fakeLogger);
-// Assert on fakeLogger.LogEntries after calling service methods.
+// Each entry is a (LogLevel LogLevel, string State) tuple:
+Assert.IsTrue(fakeLogger.Logs.Any(l => l.LogLevel == LogLevel.Error));
 ```
 
 ### FakeHttpMessageHandler
 
-Substitutes for `HttpClient`'s transport to return canned responses in tests:
+Substitutes for `HttpClient`'s transport to return canned responses. You supply a
+`ResponseLogic` function, and two static factories cover the common cases:
 
 ```csharp
-var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, "{ \"id\": 1 }");
-var client  = new HttpClient(handler) { BaseAddress = new Uri("http://test/") };
+// Build an HttpClient that answers every request with a canned JSON body:
+var client = FakeHttpMessageHandler.FakeHttpClientFactory(request =>
+    FakeHttpMessageHandler.HttpJsonResponseFactory(new { id = 1 }));
+
+// Or construct the handler yourself and vary the response per request:
+var handler = new FakeHttpMessageHandler
+{
+  ResponseLogic = request => request.RequestUri.AbsolutePath.Contains("missing")
+      ? new HttpResponseMessage(HttpStatusCode.NotFound)
+      : FakeHttpMessageHandler.HttpJsonResponseFactory(new { id = 1 }),
+};
 ```
+
+---
+
+## More helpers
+
+### HttpClientExtensions
+
+`PostAsJsonAsync<T>` / `PutAsJsonAsync<T>` extensions on `HttpClient` that serialize the
+body with NRSRx's `JsonSerializerSettings` (camelCase, ignore reference loops) — these are
+what the unigration examples use, not the `System.Net.Http.Json` versions.
+
+### MockHttpContextAccessorFactory
+
+`CreateAccessor()` returns an `IHttpContextAccessor` whose user is authenticated as
+`MockHttpContextAccessorFactory.TestUser` (default `"NRSRx Test User"`) — handy for unit
+testing anything that takes `HttpUserProvider`.
+
+### MockRedisStreamFactory (Events namespace)
+
+Moq factories for eventing tests without a real Redis:
+
+| Method | Returns |
+| --- | --- |
+| `MockRedisStreamFactory.CreateMockConnection()` | `(Mock<IConnectionMultiplexer>, Mock<IDatabase>)` pair. |
+| `MockRedisStreamFactory<TEntity, TEvent, TId>.CreatePublisher()` | A `Mock<IPublisher<…>>`. |
+| `MockRedisStreamFactory<TEntity, TEvent, TId>.CreateSubscriber(collection?)` | A mocked `RedisStreamSubscriber` that serves the given entities as messages. |
+
+### SplitMessageFactory (Events namespace)
+
+`SplitMessageFactory<TEntity>.Create(entityFactory, messageCount, taskName, userName)`
+builds a batch of `SplitMessage<TEntity>` instances for testing split-message functions.
+
+### DbContextFactory & LinqExtensions (Data namespace)
+
+| Method | Purpose |
+| --- | --- |
+| `DbContextFactory.CreateInMemoryAuditableDbContext<T>(testContext)` | New in-memory `AuditableDbContext` (with `SystemUserProvider`) for pure unit tests. |
+| `DbContextFactory.CreateInMemoryDbContext<T>(testContext)` | Same for a plain `DbContext`. |
+| `queryable.RandomAsync()` | Returns a random record from an `IQueryable` — useful for picking seeded rows. |
+
+The `Data` namespace also holds `AuditableTestInterceptor` and
+`CalculatableTestInterceptor` — EF save interceptors that stamp `IAuditable` fields and
+run `ICalculateable.CalculateValues()` for test contexts that are *not*
+`AuditableDbContext` (wired automatically by `SetupTestDbContext`).
+
+### ControllerFactory & TestingObjectValidator (WebApi.Unit namespace)
+
+For plain **unit** tests of a controller (no test server):
+`ControllerFactory<TController>.Create(args...)` news up the controller with a
+`ControllerContext`, default HTTP context, and a `TestingObjectValidator` so
+`TryValidateModel` (and therefore `[ValidateModel]`-style code paths) work outside the
+MVC pipeline.
+
+### CharacterSets
+
+String constants for `TestDataFactory.StringGenerator`: `AlphaChars`, `UpperCase`,
+`LowerCase`, `Numeric`, `Special`, and combinations.
+
+### TestCategories
+
+MSTest category constants: `Unit`, `Integration`, `Functional`, `Unigration` — use with
+`[TestCategory(TestCategories.Unigration)]` so CI can filter test runs.
+
+### TestContextRequestLoggerMiddleware / TestContextResponseLoggerAttribute
+
+Server-side counterparts to `HttpClientLoggingHandler`: middleware
+(`app.UseTestContextRequestLogger(testContext)`) and an action filter that log incoming
+requests and outgoing responses to the MSTest output. The unigration test startups wire
+these for you.
 
 ---
 

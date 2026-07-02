@@ -14,7 +14,8 @@ sinks are supported out of the box.
 | --- | --- | --- |
 | **Application Insights** | `IkeMtz.NRSRx.Logging.ApplicationInsights` | `this.SetupApplicationInsights(services)` |
 | **Elasticsearch** | `IkeMtz.NRSRx.Logging.Elasticsearch` | `this.SetupElasticsearch(app)` |
-| **Splunk** | `IkeMtz.NRSRx.Logging.Splunk` | `this.SetupSplunk(services)` |
+| **Splunk** | `IkeMtz.NRSRx.Logging.Splunk` | `this.SetupSplunk(app)` |
+| **Console only** | (ships with the Serilog-based packages) | `this.SetupConsoleLogging(app)` |
 
 There's also `IkeMtz.NRSRx.Jobs.Logging.Splunk` for the [jobs](../eventing/jobs.md) host,
 and `IkeMtz.NRSRx.Unigration.Logging` for capturing logs in
@@ -28,14 +29,27 @@ service registration (`services` is non-null) and once during pipeline configura
 (`app` is non-null) — so each sink reads whichever argument it needs.
 
 ```csharp
-// Elasticsearch (needs the app builder)
+// Elasticsearch and Splunk (Serilog-based — take the app builder)
 public override void SetupLogging(IServiceCollection? services = null, IApplicationBuilder? app = null) =>
-  this.SetupElasticsearch(app);
+  this.SetupElasticsearch(app);   // or this.SetupSplunk(app) / this.SetupConsoleLogging(app)
 
 // Application Insights (needs the service collection)
 public override void SetupLogging(IServiceCollection? services = null, IApplicationBuilder? app = null) =>
   this.SetupApplicationInsights(services);
 ```
+
+The Serilog-based sinks (Elasticsearch, Splunk, console) share some behavior:
+
+* They **always write to the console** in addition to the remote sink.
+* They enable Serilog **request logging**, enriching each request entry with `UserName`
+  (or `"Anonymous"`) and `RemoteIpAddress`.
+* They accept an optional `minimumLogLevelConfig` callback; the default minimum level is
+  `Information`:
+
+  ```csharp
+  this.SetupSplunk(app);  // Information (default)
+  this.SetupElasticsearch(app, x => x.Debug());  // more verbose
+  ```
 
 ## Enabling logging in `Program.cs`
 
@@ -48,6 +62,10 @@ CoreWebStartup.CreateDefaultHostBuilder<Startup>()
   .Build()
   .Run();
 ```
+
+Both flavors of the extension exist so `Program.cs` stays identical across sinks: the
+Serilog-based packages' `UseLogging()` calls `UseSerilog()`, while the Application
+Insights package's version is a pass-through no-op.
 
 ## Logging in a job
 
@@ -136,7 +154,7 @@ For example: `my-service-development-26-06`.
 
 | Key | Required | Purpose |
 | --- | --- | --- |
-| `ELASTICSEARCH_HOST` | ✅ | URL of the Elasticsearch endpoint, e.g. `http://localhost:9200`. |
+| `ELASTICSEARCH_HOST` | ✅ | URL of the Elasticsearch endpoint. Defaults to `http://localhost:9200` if unset. |
 | `ELASTICSEARCH_USERNAME` | For basic auth | Username. Also used as the token `id` for API key auth. |
 | `ELASTICSEARCH_PASSWORD` | For basic auth | Password. |
 | `ELASTICSEARCH_APIKEY` | For API key auth | The `api_key` value of your API key token. |
@@ -151,11 +169,11 @@ For example: `my-service-development-26-06`.
 **Package:** `IkeMtz.NRSRx.Logging.Splunk` (web) and `IkeMtz.NRSRx.Jobs.Logging.Splunk` (jobs)
 
 ```csharp
-// Web service
+// Web service (extension on CoreWebStartup — takes the app builder)
 public override void SetupLogging(IServiceCollection? services = null, IApplicationBuilder? app = null) =>
-  this.SetupSplunk(services);
+  this.SetupSplunk(app);
 
-// Job
+// Job (extension on IJob — takes the service collection)
 public override void SetupLogging(IServiceCollection services) =>
   this.SetupSplunk(services);
 ```
@@ -164,7 +182,7 @@ public override void SetupLogging(IServiceCollection services) =>
 
 | Key | Required | Purpose |
 | --- | --- | --- |
-| `SPLUNK_HOST` | ✅ | The Splunk HTTP Event Collector (HEC) endpoint URL. |
+| `SPLUNK_HOST` | ✅ | The Splunk HTTP Event Collector (HEC) endpoint URL. If unset, the logger silently falls back to console-only logging. |
 | `SPLUNK_TOKEN` | ✅ | Authentication token for the Splunk HEC. |
 | `SPLUNK_DISABLE_SSL_VALIDATION` | | Set `true` to skip SSL validation (dev only). Default: `false`. |
 | `SPLUNK_URI_PATH` | | HEC URI path. Default: `services/collector/event`. |
