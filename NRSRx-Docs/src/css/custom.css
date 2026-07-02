@@ -1,0 +1,31 @@
+/**
+ * NRSRx documentation theme.
+ * Docusaurus uses Infima; we override its color tokens here.
+ */
+
+:root {
+  --ifm-color-primary: #1f6feb;
+  --ifm-color-primary-dark: #1860d4;
+  --ifm-color-primary-darker: #175bc8;
+  --ifm-color-primary-darkest: #134ba5;
+  --ifm-color-primary-light: #3a82ef;
+  --ifm-color-primary-lighter: #4a8cf0;
+  --ifm-color-primary-lightest: #74a8f4;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #58a6ff;
+  --ifm-color-primary-dark: #3f97ff;
+  --ifm-color-primary-darker: #318fff;
+  --ifm-color-primary-darkest: #0578ff;
+  --ifm-color-primary-light: #71b5ff;
+  --ifm-color-primary-lighter: #7fbdff;
+  --ifm-color-primary-lightest: #aad3ff;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+.markdown h1:first-child {
+  --ifm-h1-font-size: 2.4rem;
+}
